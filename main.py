@@ -172,21 +172,16 @@ def download_pexels_video(query):
     return False
 
 def create_short(text, trend):
-    """Создаёт короткое видео (Shorts) из текста и фонового видео."""
     temp_files = ["voice.mp3", "stock.mp4", "short.mp4"]
     try:
-        # Озвучка
         tts = gTTS(text[:500], lang='ru')
         tts.save("voice.mp3")
 
-        # Видеофон
         if not download_pexels_video(trend):
-            logger.warning("Не удалось скачать видео, Shorts не будет создан")
             return None
 
         video = VideoFileClip("stock.mp4")
         if video.duration < 1:
-            logger.warning("Скачанное видео слишком короткое")
             video.close()
             return None
 
@@ -202,14 +197,19 @@ def create_short(text, trend):
         final.close()
         video.close()
         audio.close()
-        return "short.mp4"
+
+        # Возвращаем путь к файлу, только если он существует
+        if os.path.exists("short.mp4"):
+            return "short.mp4"
+        else:
+            return None
     except Exception as e:
         logger.error(f"Ошибка при создании Shorts: {e}")
         return None
     finally:
-        # Удаляем временные файлы
+        # Удаляем временные файлы (кроме short.mp4, его удалим в основном коде)
         for f in temp_files:
-            if os.path.exists(f):
+            if f != "short.mp4" and os.path.exists(f):
                 try:
                     os.remove(f)
                 except:
