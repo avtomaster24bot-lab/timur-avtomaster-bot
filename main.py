@@ -4,12 +4,12 @@ import requests
 import asyncio
 import re
 import logging
-import subprocess
 from google import genai
 from google.genai import types
 from telegram import Bot
 from gtts import gTTS
 from moviepy.editor import VideoFileClip, AudioFileClip
+from moviepy.audio.fx.speedx import speedx
 from config import BOT_LINK
 
 # Настройка логирования
@@ -204,31 +204,11 @@ def download_pexels_video(query):
         return False
     return False
 
-def speed_up_audio(input_file, output_file, factor=1.25):
-    """Ускоряет аудиофайл с помощью ffmpeg."""
-    try:
-        subprocess.run([
-            'ffmpeg', '-i', input_file,
-            '-filter:a', f'atempo={factor}',
-            '-y', output_file
-        ], check=True, capture_output=True)
-        return True
-    except Exception as e:
-        logger.error(f"Ошибка ускорения аудио: {e}")
-        return False
-
 def create_short(voice_text, trend):
-    temp_files = ["voice.mp3", "voice_sped.mp3", "stock.mp4", "short.mp4"]
+    temp_files = ["voice.mp3", "stock.mp4", "short.mp4"]
     try:
         tts = gTTS(voice_text, lang='ru')
         tts.save("voice.mp3")
-        
-        # Ускоряем аудио
-        if speed_up_audio("voice.mp3", "voice_sped.mp3", factor=1.25):
-            audio_file = "voice_sped.mp3"
-        else:
-            logger.warning("Ускорение не удалось, использую исходное аудио")
-            audio_file = "voice.mp3"
 
         if not download_pexels_video(trend):
             return None
@@ -241,7 +221,10 @@ def create_short(voice_text, trend):
         duration = min(45, video.duration)
         video = video.subclip(0, duration)
 
-        audio = AudioFileClip(audio_file)
+        audio = AudioFileClip("voice.mp3")
+        # Ускоряем аудио (коэффициент 1.25 – 25% быстрее)
+        audio = speedx(audio, factor=1.25)
+
         if audio.duration > duration:
             audio = audio.subclip(0, duration)
 
@@ -260,7 +243,7 @@ def create_short(voice_text, trend):
         return None
     finally:
         for f in temp_files:
-            if os.path.exists(f):
+            if f != "short.mp4" and os.path.exists(f):
                 try:
                     os.remove(f)
                 except:
