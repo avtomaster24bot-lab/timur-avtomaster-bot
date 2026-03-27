@@ -9,7 +9,6 @@ from google.genai import types
 from telegram import Bot
 from gtts import gTTS
 from moviepy.editor import VideoFileClip, AudioFileClip
-from moviepy.audio.fx.all import speedx   # правильный импорт для moviepy 1.0.3
 from config import BOT_LINK
 
 # Настройка логирования
@@ -20,7 +19,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ----------------------------------------------------------------------
-# Инициализация клиентов
 client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 TELEGRAM_BOT = Bot(token=os.getenv("TELEGRAM_BOT_TOKEN"))
@@ -28,7 +26,6 @@ CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID")
 PEXELS_KEY = os.getenv("PEXELS_API_KEY")
 
 # ----------------------------------------------------------------------
-# Список услуг
 SERVICES = [
     "диагностика авто",
     "ремонт двигателя",
@@ -205,6 +202,7 @@ def download_pexels_video(query):
     return False
 
 def create_short(voice_text, trend):
+    """Создаёт короткое видео без ускорения (стабильный вариант)."""
     temp_files = ["voice.mp3", "stock.mp4", "short.mp4"]
     try:
         tts = gTTS(voice_text, lang='ru')
@@ -222,9 +220,6 @@ def create_short(voice_text, trend):
         video = video.subclip(0, duration)
 
         audio = AudioFileClip("voice.mp3")
-        # Ускоряем аудио (коэффициент 1.25 – 25% быстрее)
-        audio = speedx(audio, factor=1.25)
-
         if audio.duration > duration:
             audio = audio.subclip(0, duration)
 
