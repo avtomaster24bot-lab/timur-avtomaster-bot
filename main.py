@@ -9,6 +9,7 @@ from google.genai import types
 from telegram import Bot
 from gtts import gTTS
 from moviepy.editor import VideoFileClip, AudioFileClip
+from pydub import AudioSegment
 from config import BOT_LINK
 
 # Настройка логирования
@@ -86,7 +87,6 @@ SYSTEM_PROMPT = f"""
 
 # ----------------------------------------------------------------------
 def get_available_model():
-    """Получает список доступных моделей и возвращает первую подходящую."""
     try:
         models = client.models.list()
         model_names = [m.name for m in models]
@@ -116,7 +116,6 @@ def ensure_complete(text):
     return text + '…'
 
 def prepare_voice_text(full_text):
-    """Извлекает короткую выжимку для озвучки, убирая имя 'Тимур'."""
     lines = full_text.split('\n')
     voice_lines = []
     found_start = False
@@ -141,7 +140,6 @@ def prepare_voice_text(full_text):
     return voice_text
 
 async def generate_post(service):
-    """Генерирует пост, автоматически выбирая модель."""
     prompt = f"""
     {SYSTEM_PROMPT}
     Сегодняшний пост посвящён услуге: **{service}**.
@@ -201,13 +199,21 @@ def download_pexels_video(query):
         return False
     return False
 
-def create_short(voice_text, trend):
-    """Создаёт короткое видео без ускорения (стабильный вариант)."""
-    temp_files = ["voice.mp3", "stock.mp4", "short.mp4"]
+def create_short(voice_text, trend, speed_factor=1.25):
+    """Создаёт видео с ускоренным голосом через pydub."""
+    temp_files = ["voice.mp3", "voice_speed.mp3", "stock.mp4", "short.mp4"]
     try:
+        # 1. Синтез речи
         tts = gTTS(voice_text, lang='ru')
         tts.save("voice.mp3")
 
+        # 2. Ускорение через pydub
+        audio = AudioSegment.from_mp3("voice.mp3")
+        # Изменяем скорость без изменения высоты тона
+        audio = audio.speedup(playback_speed=speed_factor)
+        audio.export("voice_speed.mp3", format="mp3")
+
+        # 3. Фоновое видео
         if not download_pexels_video(trend):
             return None
 
@@ -219,15 +225,15 @@ def create_short(voice_text, trend):
         duration = min(45, video.duration)
         video = video.subclip(0, duration)
 
-        audio = AudioFileClip("voice.mp3")
-        if audio.duration > duration:
-            audio = audio.subclip(0, duration)
+        audio_clip = AudioFileClip("voice_speed.mp3")
+        if audio_clip.duration > duration:
+            audio_clip = audio_clip.subclip(0, duration)
 
-        final = video.set_audio(audio)
+        final = video.set_audio(audio_clip)
         final.write_videofile("short.mp4", fps=24, codec="libx264", audio_codec="aac")
         final.close()
         video.close()
-        audio.close()
+        audio_clip.close()
 
         if os.path.exists("short.mp4"):
             return "short.mp4"
@@ -238,7 +244,7 @@ def create_short(voice_text, trend):
         return None
     finally:
         for f in temp_files:
-            if f != "short.mp4" and os.path.exists(f):
+            if os.path.exists(f):
                 try:
                     os.remove(f)
                 except:
@@ -302,7 +308,7 @@ async def main():
     logger.info("3. Создание Shorts...")
     voice_text = prepare_voice_text(post_text)
     logger.info(f"Короткий текст для видео ({len(voice_text)} символов): {voice_text[:100]}...")
-    short_path = create_short(voice_text, "car service useful tips")
+    short_path = create_short(voice_text, "car service useful tips", speed_factor=1.25)
     if short_path and os.path.exists(short_path):
         logger.info("Видео создано, отправляем...")
         try:
