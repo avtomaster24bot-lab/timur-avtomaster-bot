@@ -112,6 +112,9 @@ def ensure_complete(text):
     return text + '…'
 
 async def generate_post(service):
+    if post_text.startswith("Ошибка генерации"):
+        await notify_dev(f"❌ Бот не смог сгенерировать пост: {post_text}")
+        return
     """Генерирует пост с помощью Gemini."""
     prompt = f"""
     {SYSTEM_PROMPT}
