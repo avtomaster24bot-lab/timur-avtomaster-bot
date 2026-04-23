@@ -1,2 +1,2 @@
 # Ссылка на бот (используется в постах и видео)
-BOT_LINK =@AvtoMaster_24_bot
+BOT_LINK = "@AvtoMaster_24_bot"
