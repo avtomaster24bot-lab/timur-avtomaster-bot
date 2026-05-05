@@ -3,17 +3,20 @@ import asyncio
 import random
 import re
 import logging
-from datetime import datetime
+import io
 
 import requests
 from groq import Groq
+import google.generativeai as genai
+from PIL import Image
 
 # ======================== НАСТРОЙКИ ========================
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 CHANNEL_ID = os.environ.get("TELEGRAM_CHANNEL_ID")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")   # Ключ из переменной окружения
 SITE_URL = "https://avtomaster24bot-lab.github.io/avtomaster_24_BOT/"
-BOT_LINK = "https://t.me/AvtoMaster_24_bot"          # прямая рабочая ссылка
+BOT_LINK = "https://t.me/AvtoMaster_24_bot"
 
 if not BOT_TOKEN or not CHANNEL_ID:
     raise ValueError("Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHANNEL_ID")
@@ -21,7 +24,16 @@ if not BOT_TOKEN or not CHANNEL_ID:
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
+# Groq client
 groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
+
+# Gemini client (если ключ есть)
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+    GEMINI_MODEL = genai.GenerativeModel('gemini-2.0-flash-exp-image-generation')
+else:
+    GEMINI_MODEL = None
+    logger.warning("GEMINI_API_KEY не задан, генерация картинок недоступна")
 
 # ======================== ТЕХНИЧЕСКИЕ ТЕМЫ (для Groq) ========================
 TECHNICAL_TOPICS = [
@@ -131,6 +143,26 @@ def prepare_howto_post(raw_post: str) -> str:
         raw_post += f"\n\n👉 Подробнее на сайте: {SITE_URL}"
     return raw_post
 
+# ======================== ГЕНЕРАЦИЯ КАРТИНКИ ЧЕРЕЗ GEMINI ========================
+async def generate_image_from_text(prompt: str):
+    """Возвращает BytesIO с изображением или None."""
+    if not GEMINI_MODEL:
+        logger.warning("Gemini модель не инициализирована (нет ключа)")
+        return None
+    try:
+        # Обрезаем длинный промпт (Gemini понимает до ~400 символов для картинки)
+        short_prompt = prompt[:400] if len(prompt) > 400 else prompt
+        response = GEMINI_MODEL.generate_content(short_prompt)
+        # Извлекаем inline-данные
+        inline_data = response._result.candidates[0].content.parts[0].inline_data
+        if inline_data:
+            image_bytes = io.BytesIO(inline_data.data)
+            image_bytes.name = "post_image.jpg"
+            return image_bytes
+    except Exception as e:
+        logger.error(f"Ошибка генерации картинки: {e}")
+    return None
+
 # ======================== ОТПРАВКА В TELEGRAM ========================
 def send_to_telegram(text: str) -> bool:
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
@@ -151,12 +183,31 @@ def send_to_telegram(text: str) -> bool:
         logger.error(f"Исключение при отправке: {e}")
         return False
 
+def send_photo_to_telegram(caption: str, photo_bytes: io.BytesIO) -> bool:
+    """Отправляет фото с подписью в канал."""
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
+    files = {"photo": photo_bytes}
+    data = {
+        "chat_id": CHANNEL_ID,
+        "caption": caption.strip(),
+        "parse_mode": "HTML"
+    }
+    try:
+        resp = requests.post(url, data=data, files=files, timeout=60)
+        if resp.status_code == 200:
+            logger.info("Пост с картинкой успешно отправлен")
+        else:
+            logger.error(f"Ошибка отправки фото: {resp.status_code} {resp.text}")
+        return resp.status_code == 200
+    except Exception as e:
+        logger.error(f"Исключение при отправке фото: {e}")
+        return False
+
 # ======================== ОСНОВНАЯ ЛОГИКА ========================
 async def main():
     logger.info("=== АВТОМАСТЕР24 – ГЕНЕРАЦИЯ ПОСТА ===")
 
     # Редко (примерно 1 раз в 7-10 дней) публикуем инструкцию
-    # 0.12 = 12% дней ≈ раз в 8 дней
     if random.random() < 0.12:
         logger.info("Сегодня пост-инструкция о сервисе")
         raw_post = random.choice(HOWTO_POSTS)
@@ -166,14 +217,17 @@ async def main():
         logger.info(f"Техническая тема: {topic}")
         post_text = await generate_technical_post(topic)
         if not post_text:
-            # Если Groq не ответил, берём запасную инструкцию (чтобы пост был)
             logger.warning("Groq не ответил, публикуем инструкцию как резерв")
             raw_post = random.choice(HOWTO_POSTS)
             post_text = prepare_howto_post(raw_post)
 
-    # Финальная отправка
     if post_text and len(post_text) > 0:
-        success = send_to_telegram(post_text)
+        # Пробуем сгенерировать картинку
+        image_bytes = await generate_image_from_text(post_text)
+        if image_bytes:
+            success = send_photo_to_telegram(post_text, image_bytes)
+        else:
+            success = send_to_telegram(post_text)
         logger.info("✅ Пост опубликован" if success else "❌ Ошибка отправки")
     else:
         logger.error("Не удалось сформировать пост")
