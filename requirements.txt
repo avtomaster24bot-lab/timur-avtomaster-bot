@@ -7,3 +7,5 @@ imageio-ffmpeg
 pydub
 groq
 requests
+google-generativeai
+Pillow
